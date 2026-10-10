@@ -19,6 +19,8 @@ import "./parsers/roo-code.js";
 import "./parsers/cursor.js";
 import "./parsers/qodercli.js";
 import "./parsers/grok-build.js";
+import "./parsers/command-code.js";
+import "./parsers/deepseek-harness.js";
 
 import { createCli } from "./cli.js";
 import { isMainModule } from "./infrastructure/runtime/main-module.js";

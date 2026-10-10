@@ -61,6 +61,33 @@ tokenarena service uninstall  # 卸载服务
 
 ## 本地部署
 
+### Command Code、DeepSeek Harness 与 Hermes
+
+CLI 已接入以下本地用量来源，运行 `tokenarena status` 可查看检测结果：
+
+| 工具 | 默认记录位置 | 采集内容 |
+|------|--------------|----------|
+| Command Code | `~/.commandcode/projects/**/*.jsonl` | 模型、项目、输入、输出、缓存命中、会话时间与消息数 |
+| DeepSeek Harness (`dsh`) | `~/.dsh/sessions/**/session[.vN].jsonl[.zstd]` | 模型、项目、输入、输出、缓存命中、reasoning、会话时间与消息数 |
+| Hermes（包括接入 DeepSeek 模型） | `~/.hermes/state.db` | 数据库中记录的模型用量与会话时间 |
+
+Command Code 的输入计数包含缓存命中，采集时会扣除缓存命中并单列，避免重复累计；日志未单独保存 reasoning 用量时，该项为 0。分叉复制的消息归属父会话及其原始项目，分叉会话只累计新消息；父日志已删除时仍采集留存的历史。
+
+DeepSeek Harness 的输入、缓存读取、缓存写入是独立计数，缓存写入归入输入；reasoning 从输出中拆分。Harness 支持会话格式 v0–v4，只读取每个会话最新的日志版本，并排除分叉继承的历史记录。助手消息及未产生消息的尝试均使用最终记录的 usage；尝试未记录模型时显示为 `unknown`，不估算 token。单个日志损坏或版本不受支持时会提示并跳过该文件，其他会话仍正常统计。
+
+Harness 默认使用分帧 Zstandard 压缩。CLI 优先使用 Node 内置 Zstandard 解压；旧版 Node 可安装 `zstd` 命令并放在 `PATH` 上。未完成的最后一帧会在下一次同步时读取，已完成的帧正常统计。
+
+如果使用自定义工具目录，请在运行 TokenArena CLI 的同一个 shell 中设置 `DSH_HOME`（Harness 主目录）或 `HERMES_HOME`（Hermes 主目录），例如：
+
+```bash
+export DSH_HOME=/path/to/.dsh
+export HERMES_HOME=/path/to/.hermes
+tokenarena status
+tokenarena sync
+```
+
+这些变量只影响 CLI 本地记录发现，Web 容器不会自动采集主机上的日志。接入 DeepSeek 的 Hermes 会继续显示为 `hermes` 来源，模型保留实际 DeepSeek 模型名。
+
 ### Docker 部署（推荐）
 
 ```bash

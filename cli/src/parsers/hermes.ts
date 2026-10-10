@@ -14,7 +14,6 @@ import type { IParser, ToolDefinition } from "./types";
 
 const TOOL_ID = "hermes";
 const TOOL_NAME = "Hermes Agent";
-const DEFAULT_DB_PATH = join(homedir(), ".hermes", "state.db");
 
 const SESSIONS_QUERY = `SELECT
   id,
@@ -212,7 +211,12 @@ export class HermesParser implements IParser {
   private readonly queryRows: SqliteQueryRows;
 
   constructor(options: HermesParserOptions = {}) {
-    this.dbPath = options.dbPath || DEFAULT_DB_PATH;
+    this.dbPath =
+      options.dbPath ||
+      join(
+        process.env.HERMES_HOME?.trim() || join(homedir(), ".hermes"),
+        "state.db",
+      );
     this.queryRows = options.queryRows || readSqliteRows;
     this.tool = createToolDefinition(this.dbPath);
   }
