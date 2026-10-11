@@ -303,6 +303,12 @@
       "count": "{count, plural, =0 {0 models} one {# model} other {# models}}",
       "coverage": "Priced {pricedModels}/{totalModels} models · {coverage} of tokens matched",
       "empty": "No model usage in this range.",
+      "sources": {
+        "supplemental": "Supplemental pricing",
+        "reference": "Reference estimate",
+        "historical": "Historical pricing",
+        "subscription": "Subscription · reference estimate"
+      },
       "table": {
         "rawModel": "Raw Model",
         "officialMatch": "Official Match",

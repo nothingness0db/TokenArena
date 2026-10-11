@@ -540,6 +540,7 @@ describe("getPricingSummaryAndRows", () => {
       modelId: "gpt-5",
       modelName: "GPT-5",
       cost: { input: 2, output: 8 },
+      pricingSource: "reference",
     });
     mocks.resolveOfficialPricingProvider.mockReturnValue({
       providerId: "openai",
@@ -585,6 +586,7 @@ describe("getPricingSummaryAndRows", () => {
     expect(result.modelPricingRows).toHaveLength(1);
     expect(result.modelPricingRows[0].rawModel).toBe("gpt-5");
     expect(result.modelPricingRows[0].estimatedCostUsd).toBe(0.5);
+    expect(result.modelPricingRows[0].pricingSource).toBe("reference");
     expect(result.summary.currentUsd).toBe(0.5);
     expect(result.summary.previousUsd).toBe(0);
     expect(result.summary.deltaUsd).toBe(0.5);

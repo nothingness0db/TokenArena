@@ -25,6 +25,8 @@ vi.mock("next-intl", () => ({
           "table.reasoning": "Reasoning",
           "table.cache": "Cache",
           "table.unmatched": "No official match",
+          "sources.reference": "Reference estimate",
+          "sources.subscription": "Subscription · reference estimate",
         }[key] ?? key
       );
     },
@@ -68,6 +70,51 @@ vi.mock("@/components/ui/dialog", () => ({
 }));
 
 describe("PricingMatchDialog", () => {
+  it("distinguishes reference estimates and unmatched models with a known provider", () => {
+    const row = {
+      rawModel: "deepseek/deepseek-v4.1-flash",
+      pricingProviderId: "deepseek",
+      pricingProviderName: "DeepSeek",
+      matchedModelId: "deepseek-v4.1-flash",
+      matchedModelName: "DeepSeek V4.1 Flash",
+      inputRateUsdPerMillion: 0.15,
+      outputRateUsdPerMillion: 0.6,
+      reasoningRateUsdPerMillion: null,
+      cacheRateUsdPerMillion: 0.003,
+      totalTokens: 1000,
+      inputTokens: 400,
+      outputTokens: 300,
+      reasoningTokens: 200,
+      cachedTokens: 100,
+      estimatedCostUsd: 0.0003603,
+      estimatedInputUsd: 0.00006,
+      estimatedOutputUsd: 0.00018,
+      estimatedReasoningUsd: 0.00012,
+      estimatedCacheUsd: 0.0000003,
+    };
+    const markup = renderToStaticMarkup(
+      <PricingMatchDialog
+        rows={[
+          { ...row, pricingSource: "reference" },
+          {
+            ...row,
+            rawModel: "kimi-for-coding",
+            pricingSource: "subscription",
+          },
+          {
+            ...row,
+            rawModel: "gpt-reserve",
+            matchedModelId: null,
+            matchedModelName: null,
+          },
+        ]}
+      />,
+    );
+    expect(markup).toContain("Reference estimate");
+    expect(markup).toContain("Subscription · reference estimate");
+    expect(markup).toContain("No official match");
+  });
+
   it("renders the trigger and model price mapping rows", () => {
     const markup = renderToStaticMarkup(
       <PricingMatchDialog

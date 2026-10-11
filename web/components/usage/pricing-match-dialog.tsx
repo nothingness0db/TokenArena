@@ -109,8 +109,16 @@ export function PricingMatchDialog({ rows }: PricingMatchDialogProps) {
                               {providerLabel}
                             </Badge>
                           ) : null}
+                          {row.pricingSource ? (
+                            <Badge
+                              variant="outline"
+                              className="h-5 font-normal text-muted-foreground"
+                            >
+                              {t(`sources.${row.pricingSource}`)}
+                            </Badge>
+                          ) : null}
                         </div>
-                        {!providerLabel ? (
+                        {!row.matchedModelId ? (
                           <div className="mt-1 text-xs font-normal text-muted-foreground">
                             {t("table.unmatched")}
                           </div>

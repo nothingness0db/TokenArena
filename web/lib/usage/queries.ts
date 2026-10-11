@@ -639,6 +639,7 @@ function buildModelPricingRows(
     row.pricingProviderName = match.providerName;
     row.matchedModelId = match.modelId;
     row.matchedModelName = match.modelName;
+    row.pricingSource = match.pricingSource;
     row.inputRateUsdPerMillion = match.cost?.input ?? null;
     row.outputRateUsdPerMillion = match.cost?.output ?? null;
     row.reasoningRateUsdPerMillion = match.cost?.reasoning ?? null;

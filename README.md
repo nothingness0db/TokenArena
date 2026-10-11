@@ -1,6 +1,6 @@
 [![tokenarena](assets/banner.png)](https://token.poco-ai.com)
 
-[![Docker Image](https://img.shields.io/badge/Docker%20Image-tokenarena%3Alatest-blue?logo=docker&logoColor=white)](https://github.com/poco-ai/tokenarena/pkgs/container/tokenarena) [![pnpm](https://img.shields.io/badge/pnpm-monorepo-blue?logo=pnpm)](https://pnpm.io/) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/poco-ai/tokenarena/pulls) [![License](https://img.shields.io/github/license/poco-ai/tokenarena)](LICENSE)
+[![Docker Image](https://img.shields.io/badge/Docker%20Image-tokenarena%3Alatest-blue?logo=docker&logoColor=white)](https://github.com/poco-ai/tokenarena/pkgs/container/tokenarena) [![pnpm](https://img.shields.io/badge/pnpm-monorepo-blue?logo=pnpm)](https://pnpm.io/) [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg?style=flat-square)](https://github.com/poco-ai/tokenarena/pulls) [![License](https://img.shields.io/github/license/poco-ai/tokenarena)](LICENSE) [![React Doctor](https://www.react.doctor/share/badge?p=web&s=72&e=0&w=0&f=0)](https://www.react.doctor/share?p=web&s=72&e=0&w=0&f=0)
 
 你有没有好奇过：
 
@@ -87,6 +87,35 @@ tokenarena sync
 ```
 
 这些变量只影响 CLI 本地记录发现，Web 容器不会自动采集主机上的日志。接入 DeepSeek 的 Hermes 会继续显示为 `hermes` 来源，模型保留实际 DeepSeek 模型名。
+
+### 模型价格与预估费用
+
+Web 按模型名统一计价，价格目录来自 `models.dev`，缓存重新验证周期为 12 小时。输入、缓存命中、输出和 reasoning 分开计算；缺少独立 reasoning 单价时使用输出单价。工具名称不影响单价，费用表示 API 用量折算值。
+
+`web/lib/pricing/supplemental.ts` 保存经确认的模型别名与补充价格。MiMo 识别为 Xiaomi，`xiaomi/mimo-v2.5` 与 `mimo-v2.5` 共用模型价格；Claude Opus 的 `4.7`、`4.8` 点号拼写映射到 `4-7`、`4-8`，`claude-sonnet-4` 映射到 `claude-sonnet-4-20250514`。这些模型优先使用官方厂商目录的单价，目录缺失时使用补充价格。
+
+以下补充单价于 2026-10-11 确认，单位为美元／百万 tokens：
+
+| 模型 | 输入（未缓存） | 输入（缓存命中） | 输出 | 计价口径 |
+|------|---------------|----------------|------|----------|
+| `mimo-v2-pro`、`mimo-v2.5-pro` | $0.435 | $0.0036 | $0.87 | 补充价格，目录优先 |
+| `mimo-v2.5` | $0.14 | $0.0028 | $0.28 | 补充价格，目录优先 |
+| `claude-opus-4.7`、`claude-opus-4.8` | $5.00 | $0.50 | $25.00 | 别名映射，目录优先 |
+| `claude-sonnet-4` | $3.00 | $0.30 | $15.00 | 历史价格，目录优先 |
+| `deepseek-v4.1-flash` | $0.15 | $0.003 | $0.60 | 固定参考估算 |
+| `deepseek-v4-flash-fast`、`deepseek-v4.1-flash-fast` | $0.30 | $0.006 | $1.20 | 固定参考估算 |
+| `longcat-2.0` | $0.30 | $0.006 | $1.20 | 已确认的优惠参考价 |
+| `kimi-for-coding` | $0.95 | $0.19 | $4.00 | 订阅模型的等效参考估算 |
+
+DeepSeek、LongCat 和 Kimi 的上述参考估算优先于目录单价，避免将不同渠道价格混用；模型价格弹窗会标记参考估算、历史价格或订阅模型。固定优惠与参考单价需要人工复核更新。
+
+名称带 `-free`、`:free` 的模型，以及已确认免费的 `big-pickle`、`grok-code`，保留未定价。未知的 `codex-auto-review`、`gpt-reserve`、`hy3`、`hy4-preview` 不推断价格。未定价记录仍计入 token 用量和定价覆盖率，但不计入费用。
+
+用量桶费用按查询时的价格重算；会话费用在上传时保存。更新价格后，已有会话的保存费用需重新同步或另行重算才能更新。
+
+定价匹配弹窗示例（使用示例模型数据）：
+
+![模型定价匹配弹窗，展示补充定价、参考估算、订阅模型及历史价格标签](docs/images/pricing-matches.png)
 
 ### Docker 部署（推荐）
 
