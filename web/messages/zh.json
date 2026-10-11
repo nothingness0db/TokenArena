@@ -303,6 +303,12 @@
       "count": "{count} 个模型",
       "coverage": "已定价 {pricedModels}/{totalModels} 个模型 · 覆盖 {coverage} Tokens",
       "empty": "这个时间范围内没有模型使用数据。",
+      "sources": {
+        "supplemental": "补充定价",
+        "reference": "参考估算",
+        "historical": "历史定价",
+        "subscription": "订阅模型 · 参考估算"
+      },
       "table": {
         "rawModel": "原始模型",
         "officialMatch": "官方匹配",

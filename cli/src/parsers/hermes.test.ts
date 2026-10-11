@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HermesParser } from "./hermes";
 
 const tempDirs: string[] = [];
@@ -13,12 +13,46 @@ function makeTempDir(prefix: string): string {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
 describe("HermesParser", () => {
+  it("detects a redirected Hermes home and preserves DeepSeek model usage", async () => {
+    const dataDir = makeTempDir("tokenarena-hermes-deepseek-");
+    vi.stubEnv("HERMES_HOME", dataDir);
+    const dbPath = join(dataDir, "state.db");
+    writeFileSync(dbPath, "", "utf-8");
+    const parser = new HermesParser({
+      queryRows: async <TRow>(path: string, query: string) => {
+        expect(path).toBe(dbPath);
+        return (
+          query.includes("FROM sessions")
+            ? [
+                {
+                  id: "deepseek-session",
+                  model: "deepseek-v4-pro",
+                  startedAt: 1791626400,
+                  inputTokens: 30,
+                  outputTokens: 40,
+                  cacheReadTokens: 70,
+                  reasoningTokens: 0,
+                },
+              ]
+            : []
+        ) as TRow[];
+      },
+    });
+    expect(parser.isInstalled()).toBe(true);
+    expect((await parser.parse()).buckets[0]).toMatchObject({
+      source: "hermes",
+      model: "deepseek-v4-pro",
+      totalTokens: 140,
+    });
+  });
+
   it("parses Hermes sqlite sessions and message timing data", async () => {
     const dataDir = makeTempDir("tokenarena-hermes-");
     const dbPath = join(dataDir, "state.db");

@@ -204,14 +204,174 @@ describe("buildModelLookupCandidates", () => {
 });
 
 describe("resolveOfficialPricingMatch edge cases", () => {
-  it("returns null when catalog is null", () => {
-    expect(resolveOfficialPricingMatch(null, "claude-sonnet-4")).toBeNull();
+  it("returns null without a catalog or supplemental price", () => {
+    expect(resolveOfficialPricingMatch(null, "claude-sonnet-4-6")).toBeNull();
   });
 
   it("returns null when the model is not found in the catalog", () => {
     expect(
       resolveOfficialPricingMatch(catalog, "minimax/unknown-model-xyz"),
     ).toBeNull();
+  });
+});
+
+describe("supplemental model pricing", () => {
+  it.each([
+    ["mimo-v2-pro", "xiaomi", "mimo-v2-pro", 0.435, 0.0036, 0.87],
+    ["mimo-v2.5-pro", "xiaomi", "mimo-v2.5-pro", 0.435, 0.0036, 0.87],
+    ["xiaomi/mimo-v2.5", "xiaomi", "mimo-v2.5", 0.14, 0.0028, 0.28],
+    ["claude-opus-4.8", "anthropic", "claude-opus-4-8", 5, 0.5, 25],
+    ["anthropic/claude-opus-4.7", "anthropic", "claude-opus-4-7", 5, 0.5, 25],
+    ["claude-sonnet-4", "anthropic", "claude-sonnet-4-20250514", 3, 0.3, 15],
+    [
+      "deepseek/deepseek-v4.1-flash",
+      "deepseek",
+      "deepseek-v4.1-flash",
+      0.15,
+      0.003,
+      0.6,
+    ],
+    [
+      "deepseek/deepseek-v4-flash-fast",
+      "deepseek",
+      "deepseek-v4-flash-fast",
+      0.3,
+      0.006,
+      1.2,
+    ],
+    [
+      "deepseek/deepseek-v4.1-flash-fast",
+      "deepseek",
+      "deepseek-v4.1-flash-fast",
+      0.3,
+      0.006,
+      1.2,
+    ],
+    ["longcat-2.0", "longcat", "LongCat-2.0", 0.3, 0.006, 1.2],
+    ["kimi-for-coding", "moonshotai", "kimi-for-coding", 0.95, 0.19, 4],
+  ])(
+    "prices %s even when the upstream catalog is unavailable",
+    (raw, providerId, modelId, input, cache_read, output) => {
+      const match = resolveOfficialPricingMatch(null, raw as string);
+      expect(match).toEqual(
+        expect.objectContaining({
+          providerId,
+          modelId,
+          cost: { input, cache_read, output },
+        }),
+      );
+    },
+  );
+
+  it("uses official catalog rates for a confirmed Claude alias", () => {
+    const catalog = new Map([
+      [
+        "anthropic",
+        {
+          id: "anthropic",
+          name: "Anthropic",
+          modelsByLower: new Map([
+            [
+              "claude-opus-4-8",
+              {
+                id: "claude-opus-4-8",
+                name: "Claude Opus 4.8",
+                cost: { input: 6, output: 30, cache_read: 0.6 },
+              },
+            ],
+          ]),
+        },
+      ],
+    ]);
+    const match = resolveOfficialPricingMatch(
+      catalog,
+      " ANTHROPIC/CLAUDE-OPUS-4.8:thinking ",
+    );
+    expect(match?.cost?.input).toBe(6);
+    expect(match?.pricingSource).toBeUndefined();
+  });
+
+  it("uses the reviewed LongCat discount instead of the catalog list price", () => {
+    const catalog = new Map([
+      [
+        "longcat",
+        {
+          id: "longcat",
+          name: "LongCat",
+          modelsByLower: new Map([
+            [
+              "longcat-2.0",
+              {
+                id: "LongCat-2.0",
+                name: "LongCat 2.0",
+                cost: { input: 0.75, output: 2.95, cache_read: 0.015 },
+              },
+            ],
+          ]),
+        },
+      ],
+    ]);
+    expect(resolveOfficialPricingMatch(catalog, "longcat-2.0")).toEqual(
+      expect.objectContaining({
+        pricingSource: "reference",
+        cost: { input: 0.3, output: 1.2, cache_read: 0.006 },
+      }),
+    );
+  });
+
+  it("fills an official model with no cost while keeping unrelated models unpriced", () => {
+    const catalog = new Map([
+      [
+        "xiaomi",
+        {
+          id: "xiaomi",
+          name: "Xiaomi",
+          modelsByLower: new Map([
+            ["mimo-v2.5", { id: "mimo-v2.5", name: "MiMo V2.5", cost: null }],
+          ]),
+        },
+      ],
+    ]);
+    expect(resolveOfficialPricingMatch(catalog, "mimo-v2.5")?.cost?.input).toBe(
+      0.14,
+    );
+    expect(resolveOfficialPricingMatch(catalog, "mimo-unconfirmed")).toBeNull();
+  });
+
+  it.each([
+    "mimo-v2.5-free",
+    "xiaomi/mimo-v2.5:free",
+    "mimo-v2.5:free:thinking",
+    "deepseek/deepseek-v4.1-flash:free",
+    "nemotron-3-ultra-free",
+    "claude-opus-4.8-free",
+    "big-pickle",
+    "grok-code",
+    "codex-auto-review",
+    "gpt-reserve",
+    "hy3",
+    "hy4-preview",
+  ])("keeps free or unknown model %s unpriced", (raw) => {
+    expect(resolveOfficialPricingMatch(catalog, raw)).toBeNull();
+  });
+
+  it("does not turn a free variant into a paid catalog model", () => {
+    expect(resolveOfficialPricingMatch(catalog, "qwen-plus:free")).toBeNull();
+  });
+
+  it("labels subscription equivalents and charges reasoning once at the output rate", () => {
+    const match = resolveOfficialPricingMatch(null, "kimi-for-coding");
+    expect(match?.pricingSource).toBe("subscription");
+    const result = estimateCostUsd(
+      {
+        inputTokens: 1_000_000,
+        cachedTokens: 1_000_000,
+        outputTokens: 750_000,
+        reasoningTokens: 250_000,
+      },
+      match?.cost,
+    );
+    expect(result?.totalUsd).toBeCloseTo(5.14);
   });
 });
 

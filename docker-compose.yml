@@ -5,6 +5,9 @@ services:
       - "3000:3000"
     environment:
       - NODE_ENV=production
+      # Optional CLI home overrides; the web service does not collect local logs.
+      - DSH_HOME=${DSH_HOME:-}
+      - HERMES_HOME=${HERMES_HOME:-}
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/token_arena}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
       - BETTER_AUTH_URL=${BETTER_AUTH_URL:-http://localhost:3000}

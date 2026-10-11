@@ -4,6 +4,12 @@ import {
   type PricingCatalogModel,
   type PricingCost,
 } from "./catalog";
+import {
+  FREE_MODEL_IDS,
+  PRICING_MODEL_ALIASES,
+  SUPPLEMENTAL_PRICING,
+  type SupplementalPricingSource,
+} from "./supplemental";
 
 const MODEL_PATH_SEPARATOR = "/";
 const MODEL_VARIANT_SEPARATOR = ":";
@@ -76,6 +82,14 @@ const OFFICIAL_PRICING_PROVIDER_RULES: PricingProviderRule[] = [
     matches: (candidate) =>
       candidate.startsWith("command-") || candidate.startsWith("embed-"),
   },
+  {
+    providerId: "xiaomi",
+    matches: (candidate) => candidate.startsWith("mimo-"),
+  },
+  {
+    providerId: "longcat",
+    matches: (candidate) => candidate.startsWith("longcat-"),
+  },
 ];
 
 export type PricingModelMatch = {
@@ -84,6 +98,7 @@ export type PricingModelMatch = {
   modelId: string;
   modelName: string;
   cost: PricingCost | null;
+  pricingSource?: SupplementalPricingSource;
 };
 
 export type PricingProviderMatch = {
@@ -98,10 +113,6 @@ export type CostEstimate = {
   reasoningUsd: number;
   cacheUsd: number;
 };
-
-function _unique(values: string[]) {
-  return Array.from(new Set(values.filter(Boolean)));
-}
 
 export function buildModelLookupCandidates(rawModel: string) {
   const normalized = normalizeModelLookupKey(rawModel);
@@ -199,7 +210,13 @@ export function resolveOfficialPricingMatch(
   catalog: PricingCatalog | null,
   rawModel: string,
 ): PricingModelMatch | null {
-  if (!catalog) {
+  const candidates = buildModelLookupCandidates(rawModel);
+  if (
+    candidates.some(
+      (candidate) =>
+        /(?:-|:)free(?:$|:)/.test(candidate) || FREE_MODEL_IDS.has(candidate),
+    )
+  ) {
     return null;
   }
 
@@ -208,14 +225,28 @@ export function resolveOfficialPricingMatch(
     return null;
   }
 
-  const match = findCatalogModel(
-    catalog,
-    providerId,
-    buildModelLookupCandidates(rawModel),
+  const lookupCandidates = candidates.map((candidate) =>
+    Object.hasOwn(PRICING_MODEL_ALIASES, candidate)
+      ? PRICING_MODEL_ALIASES[candidate]
+      : candidate,
   );
-  if (!match) {
-    return null;
+  const supplemental = lookupCandidates
+    .map((candidate) =>
+      Object.hasOwn(SUPPLEMENTAL_PRICING, candidate)
+        ? SUPPLEMENTAL_PRICING[candidate]
+        : undefined,
+    )
+    .find((model) => model?.providerId === providerId);
+  const match = catalog
+    ? findCatalogModel(catalog, providerId, lookupCandidates)
+    : null;
+
+  if (supplemental && (supplemental.preferSupplemental || !match?.model.cost)) {
+    const { preferSupplemental: _, ...pricing } = supplemental;
+    return pricing;
   }
+
+  if (!match) return null;
 
   return {
     providerId,

@@ -1,3 +1,5 @@
+import type { SupplementalPricingSource } from "@/lib/pricing/supplemental";
+
 export const schemaVersion = 2 as const;
 
 export const projectModes = ["hashed", "raw", "disabled"] as const;
@@ -133,6 +135,7 @@ export type ModelPricingRow = {
   pricingProviderName: string | null;
   matchedModelId: string | null;
   matchedModelName: string | null;
+  pricingSource?: SupplementalPricingSource;
   inputRateUsdPerMillion: number | null;
   outputRateUsdPerMillion: number | null;
   reasoningRateUsdPerMillion: number | null;
