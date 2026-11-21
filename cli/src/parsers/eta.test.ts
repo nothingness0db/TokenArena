@@ -4,6 +4,28 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { EtaParser } from "./eta";
 
+type SqlTestRow = Record<string, string | number | null>;
+
+async function writeSqliteDb(
+  dbPath: string,
+  rows: SqlTestRow[],
+): Promise<void> {
+  const { DatabaseSync } = await import("node:sqlite");
+  const db = new DatabaseSync(dbPath);
+  try {
+    const columns = Object.keys(rows[0] ?? {});
+    const names = columns.map((column) => `"${column}"`).join(", ");
+    const placeholders = columns.map(() => "?").join(", ");
+    db.exec(`CREATE TABLE usage (${names})`);
+    const insert = db.prepare(
+      `INSERT INTO usage (${names}) VALUES (${placeholders})`,
+    );
+    for (const row of rows) insert.run(...columns.map((c) => row[c]));
+  } finally {
+    db.close();
+  }
+}
+
 const roots: string[] = [];
 
 function root(): string {
@@ -200,6 +222,149 @@ describe("EtaParser", () => {
       bucketStart: "2026-03-01T00:00:00.000Z",
       totalTokens: 10,
     });
+  });
+
+  it("reads non-zero usage from eta.sqlite and ignores all-zero journals", async () => {
+    const etaRoot = root();
+    const dir = sessionDir(etaRoot, "s5");
+    writeMeta(dir, {
+      id: "s5",
+      createdAt: "2026-04-01T08:00:00.000Z",
+      title: "sqlite-title",
+      model: "eta-sqlite-model",
+    });
+    writeJournal(dir, [
+      usageLine(usageRow(0, 0, 0, 0, 0, 0), {
+        timestamp: "2026-04-01T08:05:00.000Z",
+      }),
+    ]);
+    await writeSqliteDb(join(etaRoot, "eta.sqlite"), [
+      {
+        session_id: "s5",
+        input_tokens: 100,
+        output_tokens: 50,
+        cache_read_tokens: 20,
+        cache_write_tokens: 10,
+        total_tokens: 180,
+        cost_total: 0.01,
+        timestamp: "2026-04-01T08:05:00.000Z",
+      },
+      {
+        session_id: "s5",
+        input_tokens: 200,
+        output_tokens: 100,
+        cache_read_tokens: 40,
+        cache_write_tokens: 20,
+        total_tokens: 360,
+        cost_total: 0.02,
+        timestamp: "2026-04-01T08:20:00.000Z",
+      },
+      {
+        session_id: "s5",
+        input_tokens: 50,
+        output_tokens: 25,
+        cache_read_tokens: 10,
+        cache_write_tokens: 5,
+        total_tokens: 90,
+        cost_total: 0.005,
+        timestamp: "2026-04-01T08:25:00.000Z",
+      },
+    ]);
+
+    const result = await new EtaParser(etaRoot).parse();
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0]).toMatchObject({
+      source: "eta",
+      model: "eta-sqlite-model",
+      project: "sqlite-title",
+      bucketStart: "2026-04-01T08:00:00.000Z",
+      inputTokens: 350,
+      outputTokens: 175,
+      cachedTokens: 105,
+      totalTokens: 630,
+    });
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0]).toMatchObject({ totalTokens: 630 });
+  });
+
+  it("skips all-zero sqlite rows", async () => {
+    const etaRoot = root();
+    await writeSqliteDb(join(etaRoot, "eta.sqlite"), [
+      {
+        sessionId: "s-zero",
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: 0,
+        timestamp: "2026-04-02T01:00:00.000Z",
+      },
+    ]);
+
+    const result = await new EtaParser(etaRoot).parse();
+    expect(result.buckets).toEqual([]);
+    expect(result.sessions).toEqual([]);
+  });
+
+  it("reads a JSON usage blob and numeric-second timestamps", async () => {
+    const etaRoot = root();
+    writeFileSync(join(etaRoot, "eta.sqlite"), "");
+    const blob = JSON.stringify({
+      usage: {
+        input: 5,
+        output: 3,
+        cacheRead: 1,
+        cacheWrite: 0,
+        totalTokens: 9,
+        cost: { total: 0.02 },
+      },
+    });
+    const rows: SqlTestRow[] = [
+      {
+        session_id: "s6",
+        data: blob,
+        created: Date.parse("2026-05-01T12:10:00.000Z") / 1000,
+      },
+      { session_id: "s6", data: "not-json", created: 0 },
+      { session_id: "s6", data: blob, created: null },
+    ];
+    const reader = vi.fn(async () => rows);
+    const result = await new EtaParser(etaRoot, reader).parse();
+    expect(reader).toHaveBeenCalledWith(join(etaRoot, "eta.sqlite"));
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0]).toMatchObject({
+      model: "unknown",
+      project: "unknown",
+      bucketStart: "2026-05-01T12:00:00.000Z",
+      inputTokens: 5,
+      outputTokens: 3,
+      cachedTokens: 1,
+      totalTokens: 9,
+    });
+  });
+
+  it("falls back to journals when the sqlite reader throws", async () => {
+    const etaRoot = root();
+    const dir = sessionDir(etaRoot, "s7");
+    writeFileSync(join(etaRoot, "eta.sqlite"), "");
+    writeJournal(dir, [
+      usageLine(usageRow(4, 2, 1, 0, 7, 0.01), {
+        timestamp: "2026-06-01T02:05:00.000Z",
+      }),
+    ]);
+    const reader = vi.fn(async () => {
+      throw new Error("db locked");
+    });
+    const warn = vi
+      .spyOn(process.stderr, "write")
+      .mockImplementation(() => true);
+
+    const result = await new EtaParser(etaRoot, reader).parse();
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0]).toMatchObject({ totalTokens: 7 });
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("returns empty results when the eta directory is absent", async () => {
