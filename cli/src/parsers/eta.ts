@@ -395,7 +395,10 @@ async function readUsageRowsWithBuiltin(
   }) as typeof process.emitWarning;
 
   try {
-    const sqlite = (await import("node:sqlite")) as {
+    // 走变量而不是字面量：打包器会把字面量 import("node:sqlite") 的 node: 前缀
+    // 抹成 import("sqlite")，安装后运行时报 Cannot find package 'sqlite'。
+    const sqliteModuleId = "node:sqlite";
+    const sqlite = (await import(sqliteModuleId)) as {
       DatabaseSync: new (
         location: string,
         options?: { readOnly?: boolean },
