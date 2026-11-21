@@ -1,16 +1,24 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { OpenCodeParser } from "./opencode";
 
 describe("OpenCodeParser", () => {
   const originalOpenCodeDir = process.env.TOKEN_ARENA_OPENCODE_DIR;
   const createdDirs: string[] = [];
+  let etaStubDir: string;
+
+  beforeEach(() => {
+    etaStubDir = mkdtempSync(join(tmpdir(), "tokenarena-opencode-eta-"));
+    createdDirs.push(etaStubDir);
+    vi.stubEnv("TOKEN_ARENA_ETA_DIR", etaStubDir);
+  });
 
   afterEach(() => {
     process.env.TOKEN_ARENA_OPENCODE_DIR = originalOpenCodeDir;
+    vi.unstubAllEnvs();
 
     for (const dir of createdDirs.splice(0)) {
       rmSync(dir, { force: true, recursive: true });
@@ -173,5 +181,62 @@ describe("OpenCodeParser", () => {
   it("isInstalled returns false when no dirs exist", () => {
     const parser = new OpenCodeParser(() => ["/nonexistent/path"]);
     expect(parser.isInstalled()).toBe(false);
+  });
+
+  function writeJsonSession(rootDir: string, sessionId: string): void {
+    const sessionDir = join(rootDir, "storage", "message", sessionId);
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, "msg-1.json"),
+      JSON.stringify({
+        role: "assistant",
+        modelID: "gpt-4",
+        time: { created: "2026-01-15T10:00:01.000Z" },
+        tokens: { input: 200, output: 100 },
+        path: { root: "/home/user/my-project" },
+      }),
+      "utf-8",
+    );
+  }
+
+  function writeEtaMeta(id: string, meta: unknown): void {
+    const dir = join(etaStubDir, "daemon", "sessions", id);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "meta.json"), JSON.stringify(meta), "utf-8");
+  }
+
+  it("prefixes project with the eta session title when runtimeSession matches", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "tokenarena-opencode-"));
+    createdDirs.push(rootDir);
+    writeJsonSession(rootDir, "ses_eta");
+    writeEtaMeta("eta-1", {
+      title: "Fix login",
+      agentId: "agent-1",
+      runtimeSession: "ses_eta",
+    });
+
+    const result = await new OpenCodeParser(() => [rootDir]).parse();
+
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0].project).toBe("eta: Fix login");
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0].project).toBe("eta: Fix login");
+  });
+
+  it("keeps the original project when runtimeSession does not match", async () => {
+    const rootDir = mkdtempSync(join(tmpdir(), "tokenarena-opencode-"));
+    createdDirs.push(rootDir);
+    writeJsonSession(rootDir, "ses_standalone");
+    writeEtaMeta("eta-1", {
+      title: "Some other session",
+      runtimeSession: "ses_other",
+    });
+
+    const result = await new OpenCodeParser(() => [rootDir]).parse();
+
+    expect(result.buckets).toHaveLength(1);
+    expect(result.buckets[0].project).toBe("my-project");
+    expect(result.sessions).toHaveLength(1);
+    expect(result.sessions[0].project).toBe("my-project");
   });
 });

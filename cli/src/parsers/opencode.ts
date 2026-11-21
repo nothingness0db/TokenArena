@@ -9,6 +9,10 @@ import type {
   SessionEvent,
   TokenUsageEntry,
 } from "../domain/types";
+import {
+  applyEtaSessionLabels,
+  buildEtaRuntimeSessionMap,
+} from "./eta-session-map";
 import { registerParser } from "./registry";
 import type { IParser, ToolDefinition } from "./types";
 
@@ -190,9 +194,10 @@ export class OpenCodeParser implements IParser {
   async parse(): Promise<ParseResult> {
     const buckets: ParseResult["buckets"] = [];
     const sessions: ParseResult["sessions"] = [];
+    const etaLabels = buildEtaRuntimeSessionMap();
 
     for (const rootDir of this.resolveRoots()) {
-      const result = await this.parseRoot(rootDir);
+      const result = await this.parseRoot(rootDir, etaLabels);
       if (result.buckets.length > 0) {
         buckets.push(...result.buckets);
       }
@@ -208,13 +213,16 @@ export class OpenCodeParser implements IParser {
     return this.resolveRoots().some((dir) => existsSync(dir));
   }
 
-  private async parseRoot(rootDir: string): Promise<ParseResult> {
+  private async parseRoot(
+    rootDir: string,
+    etaLabels: ReadonlyMap<string, string>,
+  ): Promise<ParseResult> {
     const dbPath = join(rootDir, "opencode.db");
     const messagesDir = join(rootDir, "storage", "message");
 
     if (existsSync(dbPath)) {
       try {
-        return await this.parseFromSqlite(dbPath);
+        return await this.parseFromSqlite(dbPath, etaLabels);
       } catch (err) {
         process.stderr.write(
           `warn: opencode sqlite parse failed (${(err as Error).message}), trying legacy json...\n`,
@@ -222,10 +230,13 @@ export class OpenCodeParser implements IParser {
       }
     }
 
-    return this.parseFromJson(messagesDir);
+    return this.parseFromJson(messagesDir, etaLabels);
   }
 
-  private async parseFromSqlite(dbPath: string): Promise<ParseResult> {
+  private async parseFromSqlite(
+    dbPath: string,
+    etaLabels: ReadonlyMap<string, string>,
+  ): Promise<ParseResult> {
     const query = `SELECT
       session_id as sessionID,
       json_extract(data, '$.role') as role,
@@ -285,13 +296,18 @@ export class OpenCodeParser implements IParser {
       });
     }
 
+    applyEtaSessionLabels(entries, sessionEvents, etaLabels);
+
     return {
       buckets: aggregateToBuckets(entries),
       sessions: extractSessions(sessionEvents, entries),
     };
   }
 
-  private parseFromJson(messagesDir: string): ParseResult {
+  private parseFromJson(
+    messagesDir: string,
+    etaLabels: ReadonlyMap<string, string>,
+  ): ParseResult {
     if (!existsSync(messagesDir)) return { buckets: [], sessions: [] };
 
     const entries: TokenUsageEntry[] = [];
@@ -361,6 +377,8 @@ export class OpenCodeParser implements IParser {
         });
       }
     }
+
+    applyEtaSessionLabels(entries, sessionEvents, etaLabels);
 
     return {
       buckets: aggregateToBuckets(entries),
