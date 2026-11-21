@@ -367,6 +367,82 @@ describe("EtaParser", () => {
     warn.mockRestore();
   });
 
+  it("uses row at/model and keeps sessions that have no meta.json", async () => {
+    const etaRoot = root();
+    const dir = sessionDir(etaRoot, "with-meta");
+    writeMeta(dir, {
+      id: "with-meta",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      title: "meta-title",
+      model: "meta-model",
+    });
+    await writeSqliteDb(join(etaRoot, "eta.sqlite"), [
+      {
+        session_id: "with-meta",
+        model: "model-a",
+        input: 10,
+        output: 5,
+        cache_read: 0,
+        cache_write: 0,
+        total_tokens: 15,
+        cost_total: 0.01,
+        at: "2026-07-01T09:10:00.000Z",
+      },
+      {
+        session_id: "with-meta",
+        model: "model-b",
+        input: 20,
+        output: 10,
+        cache_read: 0,
+        cache_write: 0,
+        total_tokens: 30,
+        cost_total: 0.02,
+        at: "2026-07-01T10:10:00.000Z",
+      },
+      {
+        session_id: "no-meta",
+        model: "model-c",
+        input: 100,
+        output: 50,
+        cache_read: 0,
+        cache_write: 0,
+        total_tokens: 150,
+        cost_total: 0.03,
+        at: "2026-07-01T11:10:00.000Z",
+      },
+    ]);
+
+    const result = await new EtaParser(etaRoot).parse();
+    expect(result.buckets).toHaveLength(3);
+    const byModel = new Map(
+      result.buckets.map((bucket) => [bucket.model, bucket]),
+    );
+    expect(byModel.get("model-a")).toMatchObject({
+      bucketStart: "2026-07-01T09:00:00.000Z",
+      project: "meta-title",
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
+    });
+    expect(byModel.get("model-b")).toMatchObject({
+      bucketStart: "2026-07-01T10:00:00.000Z",
+      project: "meta-title",
+      totalTokens: 30,
+    });
+    expect(byModel.get("model-c")).toMatchObject({
+      bucketStart: "2026-07-01T11:00:00.000Z",
+      project: "unknown",
+      inputTokens: 100,
+      totalTokens: 150,
+    });
+    expect(result.buckets.reduce((sum, b) => sum + b.totalTokens, 0)).toBe(195);
+    expect(
+      result.buckets.some(
+        (bucket) => bucket.bucketStart === "2026-07-01T00:00:00.000Z",
+      ),
+    ).toBe(false);
+  });
+
   it("returns empty results when the eta directory is absent", async () => {
     const parser = new EtaParser(() => join(root(), "missing"));
     expect(parser.isInstalled()).toBe(false);

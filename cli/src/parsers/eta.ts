@@ -78,6 +78,7 @@ interface EtaSessionInfo {
 
 interface NormalizedUsage {
   sessionId: string;
+  model: string;
   input: number;
   output: number;
   reasoning: number;
@@ -152,6 +153,15 @@ const TIMESTAMP_KEYS = [
   "date",
   "insertedAt",
   "inserted_at",
+  "at",
+];
+const MODEL_KEYS = [
+  "model",
+  "modelId",
+  "modelID",
+  "model_id",
+  "modelName",
+  "model_name",
 ];
 const BLOB_KEYS = [
   "usage",
@@ -163,6 +173,20 @@ const BLOB_KEYS = [
   "json",
   "record",
   "tokens",
+];
+const SQL_COLUMN_KEYS = [
+  ...SESSION_KEYS,
+  ...INPUT_KEYS,
+  ...OUTPUT_KEYS,
+  ...CACHE_READ_KEYS,
+  ...CACHE_WRITE_KEYS,
+  ...REASONING_KEYS,
+  ...TOTAL_KEYS,
+  ...COST_KEYS,
+  ...TIMESTAMP_KEYS,
+  ...MODEL_KEYS,
+  ...BLOB_KEYS,
+  "id",
 ];
 
 function getEtaDir(env: NodeJS.ProcessEnv = process.env): string {
@@ -307,9 +331,13 @@ function normalizeUsageRow(row: SqlRow): NormalizedUsage | null {
   const timestamp = toDate(
     pick(lookup, TIMESTAMP_KEYS) ?? pick(source, TIMESTAMP_KEYS),
   );
+  const rawModel = pick(source, MODEL_KEYS) ?? pick(lookup, MODEL_KEYS);
+  const model =
+    typeof rawModel === "string" && rawModel.trim() ? rawModel.trim() : "";
 
   return {
     sessionId,
+    model,
     input,
     output,
     reasoning,
@@ -318,6 +346,22 @@ function normalizeUsageRow(row: SqlRow): NormalizedUsage | null {
     cost,
     timestamp,
   };
+}
+
+function buildUsageProjection(columns: string[]): string {
+  const selected = columns.filter((column) =>
+    SQL_COLUMN_KEYS.some(
+      (key) => normalizeColumn(key) === normalizeColumn(column),
+    ),
+  );
+  if (selected.length === 0) return "*";
+  return selected.map((column) => `"${column.replace(/"/g, '""')}"`).join(", ");
+}
+
+function columnNamesFromPragma(rows: SqlRow[]): string[] {
+  return rows
+    .map((row) => row.name)
+    .filter((name): name is string => typeof name === "string");
 }
 
 async function readUsageRowsWithBuiltin(
@@ -354,14 +398,17 @@ async function readUsageRowsWithBuiltin(
     const sqlite = (await import("node:sqlite")) as {
       DatabaseSync: new (
         location: string,
+        options?: { readOnly?: boolean },
       ) => {
         close(): void;
         prepare(sql: string): { all(): SqlRow[] };
       };
     };
-    const db = new sqlite.DatabaseSync(dbPath);
+    const db = new sqlite.DatabaseSync(dbPath, { readOnly: true });
     try {
-      return db.prepare("SELECT * FROM usage").all() as SqlRow[];
+      const info = db.prepare("PRAGMA table_info(usage)").all() as SqlRow[];
+      const projection = buildUsageProjection(columnNamesFromPragma(info));
+      return db.prepare(`SELECT ${projection} FROM usage`).all() as SqlRow[];
     } finally {
       db.close();
     }
@@ -389,16 +436,21 @@ function readUsageRowsWithCli(dbPath: string): SqlRow[] {
 
   for (const command of candidates) {
     try {
-      const output = execFileSync(
-        command,
-        ["-json", dbPath, "SELECT * FROM usage"],
-        {
+      const query = (sql: string): string =>
+        execFileSync(command, ["-readonly", "-json", dbPath, sql], {
           encoding: "utf-8",
           maxBuffer: 100 * 1024 * 1024,
           timeout: 30000,
           windowsHide: true,
-        },
-      ).trim();
+        }).trim();
+
+      const infoOutput = query("PRAGMA table_info(usage)");
+      const info =
+        infoOutput && infoOutput !== "[]"
+          ? (JSON.parse(infoOutput) as SqlRow[])
+          : [];
+      const projection = buildUsageProjection(columnNamesFromPragma(info));
+      const output = query(`SELECT ${projection} FROM usage`);
       if (!output || output === "[]") return [];
       return JSON.parse(output) as SqlRow[];
     } catch (err) {
@@ -537,7 +589,7 @@ export class EtaParser implements IParser {
       const timestamp = usage.timestamp ?? meta?.createdAt ?? null;
       if (!timestamp) continue;
 
-      const model = meta?.model ?? "unknown";
+      const model = usage.model || meta?.model || "unknown";
       const project = meta?.project ?? "unknown";
       entries.push({
         sessionId: usage.sessionId,
